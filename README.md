@@ -68,7 +68,7 @@ BBC-News-Telegram-Bot/
 
 ## Автор
 
-[@ТВОЙ_ЮЗЕРНЕЙМ](https://github.com/ТВОЙ_ЮЗЕРНЕЙМ)
+[@SigmoidDad](https://github.com/SigmoidDad)
 
 ## Лицензия
 
