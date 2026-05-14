@@ -1,0 +1,151 @@
+{
+  "name": "BBC-News-Telegram-Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "7ee6aa42-8abf-4491-b330-09eb7a55f01e",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://feeds.bbci.co.uk/news/rss.xml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "d6eac782-8c0a-445e-b248-5c1c8560bd62",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем XML из предыдущей ноды\nconst xml = $input.first().json.data;\n\n// Функция очистки текста\nfunction cleanText(text) {\n  if (!text) return \"\";\n  // Убираем CDATA обертку если есть\n  let cleaned = text.replace(/<!\\[CDATA\\[(.*?)\\]\\]>/, '$1');\n  // Заменяем HTML сущности\n  cleaned = cleaned.replace(/&amp;/g, '&')\n                   .replace(/&lt;/g, '<')\n                   .replace(/&gt;/g, '>')\n                   .replace(/&quot;/g, '\"')\n                   .replace(/&apos;/g, \"'\");\n  // Убираем лишние пробелы и переносы строк\n  cleaned = cleaned.replace(/\\s+/g, ' ').trim();\n  return cleaned;\n}\n\n// Парсим заголовки и ссылки\nconst titles = [];\nconst links = [];\nconst descriptions = [];\n\n// Ищем каждый <item> блок\nconst itemRegex = /<item>(.*?)<\\/item>/gs;\nlet itemMatch;\n\nwhile ((itemMatch = itemRegex.exec(xml)) !== null) {\n  const item = itemMatch[1];\n  \n  // Вытаскиваем title\n  const titleMatch = item.match(/<title>(.*?)<\\/title>/);\n  if (titleMatch) {\n    let title = cleanText(titleMatch[1]);\n    // Фильтруем мусор (BBC News app, рекламные ссылки)\n    if (title && \n        title.length > 5 && \n        !title.includes('BBC News app') &&\n        !title.includes('iplayer') &&\n        !title.includes('sounds') &&\n        titles.length < 12) {\n      titles.push(title);\n      \n      // Вытаскиваем link\n      const linkMatch = item.match(/<link>(.*?)<\\/link>/);\n      if (linkMatch) {\n        links.push(linkMatch[1]);\n      } else {\n        links.push('');\n      }\n    }\n  }\n}\n\n// Формируем ответ для Telegram (без Markdown, чтобы не было конфликтов)\nlet resultText = \"📰 НОВОСТИ BBC\\n\\n\";\nif (titles.length === 0) {\n  resultText += \"❌ Не удалось найти новости.\";\n} else {\n  for (let i = 0; i < titles.length; i++) {\n    resultText += `${i+1}. ${titles[i]}\\n`;\n    if (links[i]) {\n      resultText += `   ${links[i]}\\n`;\n    }\n    resultText += \"\\n\";\n  }\n  resultText += `✅ Найдено новостей: ${titles.length}`;\n}\n\nreturn [{\n  json: {\n    text: resultText,\n    titles: titles,\n    links: links\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "cfda6156-ee81-4f9d-b324-2e2f4357e088",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "chatId": "7038665545",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        800,
+        0
+      ],
+      "id": "8cc64027-831c-45e6-a7a2-7bf61365f94a",
+      "name": "Send a text message",
+      "webhookId": "7ce22c06-9eec-413a-a847-daa1676167ed",
+      "credentials": {
+        "telegramApi": {
+          "id": "Ik4OciDZe4Rj8hID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем текущие новости из предыдущей ноды (парсинга)\nconst currentData = $input.first().json;\nconst currentTitles = currentData.titles || [];\n\n// Загружаем старые заголовки из глобальной переменной (хранятся в памяти workflow)\nconst oldTitles = $vars.oldTitles || [];\n\n// Находим новые заголовки (которых не было раньше)\nconst newTitles = [];\nconst newLinks = [];\n\nfor (let i = 0; i < currentTitles.length; i++) {\n  if (!oldTitles.includes(currentTitles[i])) {\n    newTitles.push(currentTitles[i]);\n    newLinks.push(currentData.links?.[i] || '');\n  }\n}\n\n// Обновляем переменную для следующего запуска\n$vars.oldTitles = currentTitles;\n\n// Формируем текст для отправки (только если есть новые)\nlet resultText = \"\";\nif (newTitles.length > 0) {\n  resultText = \"🆕 НОВЫЕ НОВОСТИ BBC\\n\\n\";\n  for (let i = 0; i < newTitles.length; i++) {\n    resultText += `${i+1}. ${newTitles[i]}\\n`;\n    if (newLinks[i]) {\n      resultText += `   🔗 ${newLinks[i]}\\n`;\n    }\n    resultText += \"\\n\";\n  }\n  resultText += `\\n✅ Найдено новых: ${newTitles.length}`;\n} else {\n  resultText = \"✅ Новых новостей нет.\";\n}\n\nreturn [{\n  json: {\n    text: resultText,\n    hasNew: newTitles.length > 0,\n    newTitles: newTitles,\n    newLinks: newLinks\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        0
+      ],
+      "id": "596b9ded-c873-46f7-a951-4149e14b6f02",
+      "name": "Code in JavaScript1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "236568d5-a269-4526-aa84-6a17559536b8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "302099109f48ca7c73567ef405af6749aaf490ffacee7ed17b5b4f39ff7f88ce"
+  },
+  "id": "oKaaAroeETzQpthR",
+  "tags": []
+}
